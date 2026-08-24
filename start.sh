@@ -15,8 +15,11 @@ set -euo pipefail
 #     --mem-fraction-static 0.95 and --disable-prefill-cuda-graph.
 #   - --attention-backend flashinfer is required on SM120/SM121
 #     (trtllm_mha is SM100-only).
-#   - Default checkpoint is RadixArk/Qwen3.8-27B-NVFP4 (W4A4 + FP8
-#     projections, ~16.5GB weights). Override with QUANT=bf16|fp8|nvfp4:
+#   - Default checkpoint is RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead
+#     (NVFP4 W4A4 + FP8 projections, dense BF16 lm_head; cookbook
+#     recipes were measured against this export). The packed-FP4-head
+#     twin is QUANT=nvfp4-fp4 (RadixArk/Qwen3.8-27B-NVFP4). Override
+#     with QUANT=bf16|fp8|nvfp4|nvfp4-fp4:
 #       QUANT=fp8 ./start.sh
 #   - KV cache is explicitly FP8 (--kv-cache-dtype fp8_e4m3). The NVFP4
 #     checkpoint declares kv_cache_quant_algo: FP8, so auto would apply
@@ -130,10 +133,13 @@ fi
 
 QUANT="${QUANT:-nvfp4}"
 case "${QUANT}" in
-  bf16)  MODEL_ID="Qwen/Qwen3.8-27B" ;;
-  fp8)   MODEL_ID="Qwen/Qwen3.8-27B-FP8" ;;
-  nvfp4) MODEL_ID="RadixArk/Qwen3.8-27B-NVFP4" ;;
-  *) echo "Unknown QUANT '${QUANT}' (use bf16|fp8|nvfp4)"; exit 1 ;;
+  bf16) MODEL_ID="Qwen/Qwen3.8-27B" ;;
+  fp8)  MODEL_ID="Qwen/Qwen3.8-27B-FP8" ;;
+  nvfp4|nvfp4-bf16|nvfp4-bf16-head)
+        MODEL_ID="RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead" ;;
+  nvfp4-fp4|nvfp4-fp4-head)
+        MODEL_ID="RadixArk/Qwen3.8-27B-NVFP4" ;;
+  *) echo "Unknown QUANT '${QUANT}' (use bf16|fp8|nvfp4|nvfp4-fp4)"; exit 1 ;;
 esac
 
 # Context length: any value from native up to the model's validated 1M.

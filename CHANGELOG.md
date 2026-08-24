@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. Dates are commit dates.
 
+## 2026-08-25 — Default NVFP4 uses the dense BF16 `lm_head`
+
+SGLang now ships two NVFP4 checkpoints ([cookbook split](https://github.com/sgl-project/sglang/pull/36020)): packed-FP4 `lm_head` vs dense BF16. Cookbook recipes were measured against the BF16-head export, so this repo follows that.
+
+**Changed:**
+
+- `QUANT=nvfp4` (default) and `DF_TARGET=nvfp4` now load `RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead` instead of `RadixArk/Qwen3.8-27B-NVFP4`. That includes `./start-dflash.sh` with no extras.
+- Packed-FP4-head remains available as `QUANT=nvfp4-fp4` / `DF_TARGET=nvfp4-fp4`. Full BF16 weights stay `QUANT=bf16` / `DF_TARGET=bf16` (`Qwen/Qwen3.8-27B`).
+- Aliases: `nvfp4-bf16` / `nvfp4-bf16-head` and `nvfp4-fp4-head`.
+- Dense BF16 head is ~1.7 GB larger on disk and ~3.2 GB larger at runtime than the packed-FP4 twin. Existing mem-fraction pins (DSpark/DFlash2 0.90, MTP 0.95) are unchanged; if capture OOMs, drop `mem-fraction-static`. Prior on-box numbers were taken on the FP4-head export.
+
 ## 2026-08-18 — DSpark vs MTP A/B; benches under `bench/`
 
 **Performance (live, same NVFP4 weights, same `lmsysorg/sglang:qwen38-27b`, 2026-08-18 evening):**

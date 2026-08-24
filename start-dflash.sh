@@ -9,11 +9,12 @@ set -euo pipefail
 # from patch/ (patch/build-dflash2-image.sh + overlay-dflash2/; needs git +
 # network on first build).
 # CRASH RULES (NVFP4): --mem-fraction-static 0.90 (0.95 hard-rebooted the
-# GB10 once at draft-graph capture; fixed since by running the quantized head
-# in place, no dense dequant) and modest MAX_CONCURRENT_REQUESTS if the box
-# is busy; NVFP4 needs the quantized-head selector support baked into the
-# image or the first request dies ("DFlash2 selector requires a dense ...
-# target lm_head"); DFLASH requires --mamba-radix-cache-strategy
+# GB10 once at draft-graph capture). Default DF_TARGET=nvfp4 is the
+# BF16-lm_head export (dense head; DFLASH selector works without the
+# quantized-head patch). Packed-FP4-head (DF_TARGET=nvfp4-fp4) still
+# needs the image patch or the first request dies ("DFlash2 selector
+# requires a dense ... target lm_head"). DFLASH requires --mamba-radix-cache-strategy extra_buffer
+# (extra_buffer_lazy is rejected).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -70,9 +71,12 @@ ensure_cached "${DRAFT_MODEL}"
 
 DF_TARGET="${DF_TARGET:-nvfp4}"
 case "${DF_TARGET}" in
-  bf16)  TARGET_PATH="Qwen/Qwen3.8-27B" ;;
-  nvfp4) TARGET_PATH="RadixArk/Qwen3.8-27B-NVFP4" ;;
-  *) echo "DF_TARGET must be bf16 or nvfp4, got '${DF_TARGET}'"; exit 1 ;;
+  bf16) TARGET_PATH="Qwen/Qwen3.8-27B" ;;
+  nvfp4|nvfp4-bf16|nvfp4-bf16-head)
+        TARGET_PATH="RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead" ;;
+  nvfp4-fp4|nvfp4-fp4-head)
+        TARGET_PATH="RadixArk/Qwen3.8-27B-NVFP4" ;;
+  *) echo "DF_TARGET must be bf16, nvfp4, or nvfp4-fp4, got '${DF_TARGET}'"; exit 1 ;;
 esac
 
 EXTRA_ARGS="--model-path ${TARGET_PATH} \
@@ -80,9 +84,10 @@ EXTRA_ARGS="--model-path ${TARGET_PATH} \
 --speculative-draft-model-path ${DRAFT_MODEL}${DRAFT_REVISION:+ --speculative-draft-model-revision ${DRAFT_REVISION}} \
 --speculative-num-draft-tokens 8 \
 --mamba-radix-cache-strategy extra_buffer"
-if [[ "${DF_TARGET}" == "nvfp4" ]]; then
-  EXTRA_ARGS+=" --mem-fraction-static 0.90"
-fi
+case "${DF_TARGET}" in
+  nvfp4|nvfp4-bf16|nvfp4-bf16-head|nvfp4-fp4|nvfp4-fp4-head)
+    EXTRA_ARGS+=" --mem-fraction-static 0.90" ;;
+esac
 EXTRA_ARGS+=" ${DF_EXTRA:-}"
 export EXTRA_ARGS
 

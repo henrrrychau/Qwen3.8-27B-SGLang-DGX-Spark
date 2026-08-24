@@ -1,7 +1,7 @@
 # Qwen3.8 27B on SGLang for DGX Spark
 
 [![SGLang](https://img.shields.io/badge/SGLang-cookbook-blue)](https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-27B)
-[![Model](https://img.shields.io/badge/model-Qwen3.8--27B-informational)](https://huggingface.co/RadixArk/Qwen3.8-27B-NVFP4)
+[![Model](https://img.shields.io/badge/model-Qwen3.8--27B-informational)](https://huggingface.co/RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead)
 [![arch](https://img.shields.io/badge/arch-arm64%20%2F%20GB10-lightgrey)](#)
 
 <p align="center">
@@ -11,13 +11,13 @@
   <a href="https://x.com/MiaAI_lab" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin:0 8px;vertical-align:middle;"><img src="https://img.shields.io/badge/Follow%20me%20on%20X-000000?style=for-the-badge&logo=x&logoColor=white" alt="Follow Mia on X" height="28" style="height:28px;width:auto;vertical-align:middle;border:0;" /></a>
 </p>
 
-Opinionated, ready-to-run scripts to serve **[Qwen3.8-27B](https://huggingface.co/RadixArk/Qwen3.8-27B-NVFP4)** with **[SGLang](https://docs.sglang.io)** in Docker on an NVIDIA DGX Spark (GB10, aarch64). Three swap-in serving modes — EAGLE/MTP, DSpark, or DFlash2 — with every tuning choice measured on-device instead of guessed.
+Opinionated, ready-to-run scripts to serve **[Qwen3.8-27B](https://huggingface.co/RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead)** with **[SGLang](https://docs.sglang.io)** in Docker on an NVIDIA DGX Spark (GB10, aarch64). Three swap-in serving modes — EAGLE/MTP, DSpark, or DFlash2 — with every tuning choice measured on-device instead of guessed.
 
 **DSpark and DFlash2 are faster on code.** Versus MTP, DSpark gives the essay back; DFlash2 does not. Everyday chat on the same streamed probe comes out a DFlash2 win once tokens are counted right, and the long-essay probe is on the MTP side of the table. **All measured numbers, ranges, counting notes and caveats live in [Measured on this box](#measured-on-this-box) — one place, nothing repeated.**
 
 The launch flags start from the **[SGLang cookbook's DGX Spark cell](https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-27B)** (NVFP4 + DSpark), then pin choices measured on this box: GDN **bf16** (cookbook float32 was −3%), `extra_buffer_lazy`, mem **0.90**, chunk **8192**, DSpark **block 7 / 8 draft tokens**, torch.compile + decode graphs, X5 cpuset.
 
-- **NVFP4 W4A4** checkpoint (default; BF16 and FP8 available via `QUANT=…`)
+- **NVFP4 W4A4** checkpoint with a dense **BF16 `lm_head`** (default; packed-FP4 head via `QUANT=nvfp4-fp4`; full BF16 and FP8 via `QUANT=…`)
 - **native 262K context, YaRN off, and 10 concurrent requests by default** — optionally extend to a validated 1M via YaRN (see “[Long context & concurrency](#long-context--concurrency-up-to-1m-10-concurrent)”)
 - **FP8 KV cache** (`fp8_e4m3`, ~2× KV memory savings; uses the NVFP4 checkpoint's calibration scales)
 - **GDN state pool** sized correctly from `MAX_CONCURRENT_REQUESTS` (concurrency × 4 state slots; the spec verify window is a **separate** engine-side buffer — verified in the build's `kv_cache_configurator`)
@@ -36,7 +36,7 @@ The launch flags start from the **[SGLang cookbook's DGX Spark cell](https://doc
 | CLI tools | `docker`, `curl` |
 | Hugging Face token | `HF_TOKEN` defined in `~/.bashrc` (picked up automatically; higher rate limits) |
 
-There is no separate download step: the container pulls the checkpoint into `./.cache/huggingface` on first start (~22 GB for the NVFP4 repo; the cookbook cites ~16.5 GB for the NVFP4 LM weights alone, before the MTP head).
+There is no separate download step: the container pulls the checkpoint into `./.cache/huggingface` on first start (~24 GB for the default NVFP4 BF16-head repo; the packed-FP4 twin is ~1.7 GB smaller on disk). The cookbook cites ~16.5 GB for the NVFP4 LM weights alone before the MTP head; the dense `lm_head` adds ~1.7 GB on disk / ~3.2 GB at runtime.
 
 ## Quick start (ships as native 262K, 10 concurrent)
 
@@ -59,7 +59,7 @@ curl http://127.0.0.1:8888/v1/models
 
 `.env.sample` ships with `YARN=0`, `CONTEXT_LENGTH=262144` (native) and `MAX_CONCURRENT_REQUESTS=10` — so a fresh clone serves **262K context, YaRN off, 10 concurrent** after just the `cp` above. `.env` is the live config (plain `VAR=value` lines read by `start.sh`): shell exports of the same names win, `.env` fills the gaps, start.sh defaults apply last. Changes only take effect on the **next** launch — `./stop.sh && ./start-dspark.sh` (or `./start.sh` for MTP). For anything above native context (e.g. 1M) or a different concurrency, see [Long context & concurrency](#long-context--concurrency-up-to-1m-10-concurrent). Note: DSpark cannot use YaRN / context &gt; 262144 on this build (ditto DFlash2 — same draft-config leak).
 
-`start-dflash.sh` is self-contained but different: no released SGLang image has DFlash2 support yet (it merged upstream 2026-08-19, after every published tag including the pinned `qwen38-27b`), so on a machine without the local `lmsysorg/sglang:qwen38-27b-dflash2` image the script **builds it automatically** (needs git + network once) via `patch/build-dflash2-image.sh`, which overlays the mainline python tree at that commit plus `patch/dflash2_nvfp4_head.patch` (quantized-head selector support for the NVFP4 target via `lm_head.quant_method` — no dense dequant; a dequant-once approach hard-rebooted this box at graph capture) onto the pinned GB10 image. First boot then pulls the ~2.7 GB draft if missing.
+`start-dflash.sh` is self-contained but different: no released SGLang image has DFlash2 support yet (it merged upstream 2026-08-19, after every published tag including the pinned `qwen38-27b`), so on a machine without the local `lmsysorg/sglang:qwen38-27b-dflash2` image the script **builds it automatically** (needs git + network once) via `patch/build-dflash2-image.sh`, which overlays the mainline python tree at that commit plus `patch/dflash2_nvfp4_head.patch` (quantized-head selector for the packed-FP4 `lm_head` via `lm_head.quant_method` — no dense dequant; a dequant-once approach hard-rebooted this box at graph capture). Default `DF_TARGET=nvfp4` is the dense BF16-head export, so that patch is only required for `DF_TARGET=nvfp4-fp4`. First boot then pulls the ~2.7 GB draft if missing.
 
 All start scripts are idempotent: if the container is already running they say so and exit; if a stopped container exists they remove it first. `./stop.sh` stops whichever engine is up.
 
@@ -69,7 +69,7 @@ All start scripts are idempotent: if the container is already running they say s
 |---|---|
 | `start.sh` | Launches the SGLang container (`docker run -d`, host network, `--shm-size 32g`), streams logs to `.sglang.log`, records the container ID in `.sglang.pid`, and polls `http://127.0.0.1:8888/v1/models` until the server is ready. **EAGLE/MTP speculative decoding** (`SPEC_STEPS/SPEC_TOPK/SPEC_DRAFT = 3/1/4`). Monitoring on by default: Prometheus `--enable-metrics` + `--enable-cache-report` (per issue #3). |
 | `start-dspark.sh` | Same service, **DSpark** instead of EAGLE: block-7 / unquant draft, torch.compile + decode-graph caps, `--num-continuous-decode-steps 2`, mem 0.90. Thin wrapper (`EXTRA_ARGS` → `start.sh`). **Code 51.5 vs MTP 34.5 — see [Measured on this box](#measured-on-this-box) for all numbers.** |
-| `start-dflash.sh` | Same service, **DFlash2** block-diffusion draft (default `z-lab/Qwen3.8-27B-DFlash2@50307d4`, pinned — same draft as the `incoai/…` mirror; `DRAFT_MODEL`/`DRAFT_REVISION` env-overridable). **Default target: NVFP4** `RadixArk/Qwen3.8-27B-NVFP4` with `--mem-fraction-static 0.90` and quantized-head selector support baked into the image (in-place `lm_head.quant_method.apply` — no dense dequant; a dequant-once approach hard-rebooted this box); `DF_TARGET=bf16` selects `Qwen/Qwen3.8-27B` instead. Builds the image automatically on first run from `patch/` if missing. Measured numbers: [Measured on this box](#measured-on-this-box). |
+| `start-dflash.sh` | Same service, **DFlash2** block-diffusion draft (default `z-lab/Qwen3.8-27B-DFlash2@50307d4`, pinned — same draft as the `incoai/…` mirror; `DRAFT_MODEL`/`DRAFT_REVISION` env-overridable). **Default target: NVFP4 BF16-head** `RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead` with `--mem-fraction-static 0.90` (dense `lm_head`, so DFLASH's selector uses the native dense path). Packed-FP4 head: `DF_TARGET=nvfp4-fp4` (needs the quantized-head selector in the image — in-place `lm_head.quant_method.apply`; a dequant-once approach hard-rebooted this box). `DF_TARGET=bf16` selects `Qwen/Qwen3.8-27B`. Builds the image automatically on first run from `patch/` if missing. Measured numbers: [Measured on this box](#measured-on-this-box). |
 | `patch/build-dflash2-image.sh` | Builds the DFlash2 image (`--full` default: pinned mainline python tree + `patch/dflash2_nvfp4_head.patch`, needs git+network first time; `--minimal`: only the 5 DFlash2 modules from `patch/overlay-dflash2/`, sha256-verified, no network). Auto-invoked by `start-dflash.sh` when the image is missing (`--minimal` iff `IMAGE=…-minoverlay`). |
 | `bench/ndec.py` | Two-call net-decode A/B (LRUCache + essay, thinking off). How the DSpark vs MTP numbers above were measured. Run twice; trust the second; treat code deltas &lt;15% as noise. |
 | `bench/bench.sh` | Essay / tool-call **wall-time** bench + 16K TTFT probe (includes prefill). Different clock from `ndec.py`. |
@@ -88,7 +88,7 @@ Performance numbers for all three engines live in the **single table in [Measure
 | | `./start-dspark.sh` (DSpark block-7) | `./start.sh` (EAGLE/MTP 3/1/4) | `./start-dflash.sh` (DFlash2, NVFP4) |
 |---|---|---|---|
 | Best for | agents, code, tools, **normal chat** (**default here**) | long-form writing | code AND long-form writing (essay holds; chat is a win too) |
-| Memory | 22 GB target + ~2.7 GB draft, mem 0.90 | 22 GB target (in-checkpoint MTP), mem 0.95 | NVFP4: 22 GB target + ~2.6 GB draft, **mem 0.90**; bf16: 52 GB weights |
+| Memory | ~24 GB BF16-head target + ~2.7 GB draft, mem 0.90 | ~24 GB BF16-head target (in-checkpoint MTP), mem 0.95 | NVFP4 BF16-head: ~24 GB target + ~2.6 GB draft, **mem 0.90**; packed-FP4 ~22 GB; full bf16: 52 GB weights |
 
 DSpark/MTP columns are live 2026-08-18 evening; DFlash2 on 2026-08-19 (n=5, same single boot, same probes) — numbers and caveats are in [Measured on this box](#measured-on-this-box). **Take-aways, with that caveat firmly in mind:** DFlash2 on NVFP4 ties DSpark on code (inside the <15% noise band), *beats MTP* on the long essay, and *beats both on every short-chat condition* once counted from `completion_tokens` (the earlier ~9.2 “tok/s” reading was an SSE event-counting artifact — see the counting note in [Measured on this box](#measured-on-this-box)). Watchpoints: `mem-fraction-static 0.95` + DFlash2 wedged the box once (hard reboot; see [Logs & troubleshooting](#logs--troubleshooting)) — root-caused and fixed (see the DFlash2 bullet); the current `0.90` + 16-concurrent profile boot-**validated** 2026-08-19 with no reboot (concurrency ladder in [Measured on this box](#measured-on-this-box)). bf16 target is entirely unmeasured. Do not compare these to sparkDash fill-to-max streams.
 
@@ -109,7 +109,7 @@ Defaults live at the top of `start.sh`:
 | `MAMBA_SKIP_DECODE_LOCK` | `0` | `1` sets `SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK` in the container — frees one GDN state slot per request (S 4→3) |
 | `PREFILL_CUDA_GRAPH` | `0` | `1` drops `--disable-prefill-cuda-graph`. Info: this build auto-disables prefill graphs on this model anyway (GDN layers ≠ standard GQA) |
 | `EXTRA_ARGS` | — | Free-form extra SGLang flags, appended **last** (argparse last-wins, so they can override built-ins). The experiment hatch: `EXTRA_ARGS="--fp4-gemm-runner-backend triton" ./start.sh` |
-| `QUANT` | `nvfp4` | `nvfp4` → `RadixArk/Qwen3.8-27B-NVFP4`, `fp8` → `Qwen/Qwen3.8-27B-FP8`, `bf16` → `Qwen/Qwen3.8-27B`. All three fit in the Spark's 128 GB. |
+| `QUANT` | `nvfp4` | `nvfp4` → `RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead` (dense BF16 `lm_head`; cookbook-measured export), `nvfp4-fp4` → `RadixArk/Qwen3.8-27B-NVFP4` (packed FP4 `lm_head`), `fp8` → `Qwen/Qwen3.8-27B-FP8`, `bf16` → `Qwen/Qwen3.8-27B`. All fit in the Spark's 128 GB. |
 | (shell overrides) | — | Any variable above can also be set as a shell env var, or put in `.env` |
 | `SERVED_MODEL_NAME` | `qwen3.8-27b-sglang` | Name clients use in API requests |
 | `IMAGE` | `lmsysorg/sglang:qwen38-27b` | Cookbook-pinned image for this model |
@@ -131,7 +131,7 @@ Note: `--cuda-graph-max-bs` is a deprecated alias in this build; the DSpark stac
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DF_TARGET` | `nvfp4` | `nvfp4` (default) → `RadixArk/Qwen3.8-27B-NVFP4` (+`--mem-fraction-static 0.90`); `bf16` → `Qwen/Qwen3.8-27B`. The NVFP4 path requires the quantized-head selector support baked into the derived image; without it, DFLASH dies at the first request (see [Scripts](#scripts)). |
+| `DF_TARGET` | `nvfp4` | `nvfp4` (default) → `RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead` (+`--mem-fraction-static 0.90`; dense head, native DFLASH selector); `nvfp4-fp4` → packed-FP4 `RadixArk/Qwen3.8-27B-NVFP4` (needs the quantized-head selector in the derived image); `bf16` → `Qwen/Qwen3.8-27B`. |
 | `DF_EXTRA` | — | Extra SGLang flags appended AFTER the base DFlash2 stack (last-wins). E.g. `DF_EXTRA="--mem-fraction-static 0.90" ./start-dflash.sh` |
 | `IMAGE` | `lmsysorg/sglang:qwen38-27b-dflash2` (local) | The derived image; the script builds it if missing (auto-invokes `patch/build-dflash2-image.sh`). Override with `IMAGE=tag` — e.g. `IMAGE=lmsysorg/sglang:qwen38-27b-dflash2-minoverlay` (built via `patch/build-dflash2-image.sh --minimal`). |
 | `DRAFT_MODEL` / `DRAFT_REVISION` | `z-lab/Qwen3.8-27B-DFlash2` / `50307d4…` | Pinned DFlash2 draft (same weights as the `incoai/…` mirror). `DRAFT_MODEL=incoai/Qwen3.8-27B-DFlash2 DRAFT_REVISION=dedf8df…` reproduces the original n=5 baseline; `DRAFT_REVISION=''` follows a branch head. |
@@ -191,7 +191,7 @@ Rules of thumb:
 
 ### Measured on this box
 
-**Probe × engine — the one canonical table** (DSpark/MTP measured 2026-08-18, DFlash2 2026-08-19):
+**Probe × engine — the one canonical table** (DSpark/MTP measured 2026-08-18, DFlash2 2026-08-19, all on the packed-FP4-head export; the default is now the BF16-head twin — same body, denser `lm_head`):
 
 | Probe | DSpark (`./start-dspark.sh`, block-7) | MTP (`./start.sh`, EAGLE 3/1/4) | DFlash2 (`./start-dflash.sh`, NVFP4 target) |
 |---|---|---|---|
@@ -263,14 +263,14 @@ SGLang also serves an **Anthropic-compatible** endpoint at `http://127.0.0.1:888
 - After a DFlash2 boot: `grep -oE "speculative_algorithm='[^']+'|speculative_draft_model_path='[^']+'|speculative_num_draft_tokens=[0-9]+" .sglang.log | tail -3` — expect `DFLASH`, `incoai/…-DFlash2`, `8`. Also grep for `Initialized DFLASH draft runner` and `DFLASH selector decode … folded into the draft cuda graph` (if you see `kept eager (reason=quantized lm_head)` on a boot, the dequant patch is not in the image — rebuild)
 - If the GB10 hard-reboots (kernel log: `task sglang::schedul … blocked …` / `journald … Under memory pressure`) right after `Capture target verify CUDA graph end`, it was DFlash2 + a too-high `--mem-fraction-static` (0.95) at draft-graph capture; relaunch DFlash2 at 0.90. **Root cause found 2026-08-19:** the crashes (0.95, and 0.80 at concurrency ≥ 8–10) were caused by the old dequant-once head handling materializing the full dense NVFP4 lm_head (~2.5–5 GB) during graph capture — fixed in the image (in-place `lm_head.quant_method.apply` selector; no dense dequant). If you still see this signature, it's not the mem fraction per se. If you need mixed-chat benchmarks, run them when nothing else is loaded.
 - DFlash2 SSE streams emit ~8 events/s regardless of throughput (measured 2026-08-19: median 126 ms between events) and, on this newer image, each event carries several tokens (~3.75 on average) — so event-counting a DFlash2 stream under-reads tok/s ~4×. Always count `completion_tokens` (`stream_options.include_usage`) for real rates; the DSpark/MTP-era short-chat cells used an event-counting script on the older stock image, where events ≈ single tokens
-- If a DFlash2 request dies with `DFlash2 selector requires a dense FP16/BF16/FP32 target lm_head` on an NVFP4 target, the image lacks the quantized-head selector support — rebuild it with `patch/build-dflash2-image.sh` and run that image
+- If a DFlash2 request dies with `DFlash2 selector requires a dense FP16/BF16/FP32 target lm_head` on `DF_TARGET=nvfp4-fp4`, the image lacks the quantized-head selector — rebuild with `patch/build-dflash2-image.sh`. The default BF16-head export is already dense and does not need that patch
 - `start.sh` / `start-dspark.sh` print the last 200 log lines and exit if the container dies before becoming ready
 - Terminal output filters the harmless per-layer “Enabled fused SiLU+mul+FP4-quant…” notices; `.sglang.log` keeps everything
 - Concurrency check: `grep max_running_requests .sglang.log` — should equal your `MAX_CONCURRENT_REQUESTS` (default 10), not a lower clamped value
 - Mamba pool check: `grep max_mamba_cache_size .sglang.log` — expect `MAX_CONCURRENT_REQUESTS × 4`
 - First long prefill after a cold boot is slow (~13 s for a fresh 16K prompt vs ~8 s warm) — that's Triton kernel warmup, not a regression; the `.cache/triton` volume persists it across restarts
 - If startup dies with `AttributeError: 'PreTrainedConfig' object has no attribute 'max_position_embeddings'`, you're using DSpark with `YARN=1` / `CONTEXT_LENGTH=1000000` — the YaRN override leaks into the draft config. Keep `YARN=0` and `CONTEXT_LENGTH=262144` for DSpark (see Context note)
-- First start downloads ~22 GB of weights (plus ~2.7 GB DSpark draft model if you switch to DSpark); subsequent starts reuse `./.cache/huggingface`
+- First start downloads ~24 GB of weights for the default BF16-head NVFP4 export (plus ~2.7 GB DSpark draft model if you switch to DSpark); subsequent starts reuse `./.cache/huggingface`. The packed-FP4 twin (`QUANT=nvfp4-fp4`) is ~1.7 GB smaller on disk.
 
 ## Repository layout
 
@@ -295,14 +295,15 @@ Experiment write-ups are local-only (untracked): `DS4F.md`, `KIMI.md`, `GROK.md`
 
 ## Notes
 
-- `QUANT` values: `nvfp4` → `RadixArk/Qwen3.8-27B-NVFP4`, `fp8` → `Qwen/Qwen3.8-27B-FP8`, `bf16` → `Qwen/Qwen3.8-27B` (all fit in the Spark's 128 GB).
+- `QUANT` values: `nvfp4` → `RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead`, `nvfp4-fp4` → `RadixArk/Qwen3.8-27B-NVFP4`, `fp8` → `Qwen/Qwen3.8-27B-FP8`, `bf16` → `Qwen/Qwen3.8-27B` (all fit in the Spark's 128 GB).
 - `SERVED_MODEL_NAME`, `IMAGE`, `CONTAINER_NAME`, `PORT` are set inline in `start.sh` (not `.env`).
 
 ## Credits
 
 - [SGLang cookbook — Qwen3.8-27B](https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-27B) — the DGX Spark serving recipe, MTP and GDN state-pool guidance
 - [Qwen3.8-27B model card](https://huggingface.co/Qwen/Qwen3.8-27B) — YaRN 1M-context SGLang recipe and sampling recommendations
-- [RadixArk/Qwen3.8-27B-NVFP4](https://huggingface.co/RadixArk/Qwen3.8-27B-NVFP4) — NVFP4 W4A4 checkpoint (FP8 KV calibration scales)
+- [RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead](https://huggingface.co/RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead) — default NVFP4 W4A4 checkpoint, dense BF16 `lm_head` (the export the [SGLang cookbook](https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-27B) recipes were measured against)
+- [RadixArk/Qwen3.8-27B-NVFP4](https://huggingface.co/RadixArk/Qwen3.8-27B-NVFP4) — same NVFP4 body with `lm_head` packed to FP4 (`QUANT=nvfp4-fp4`)
 - [RadixArk/Qwen3.8-27B-DSpark](https://huggingface.co/RadixArk/Qwen3.8-27B-DSpark) — the DSpark draft model used by `start-dspark.sh`
 - [incoai/Qwen3.8-27B-DFlash2](https://huggingface.co/incoai/Qwen3.8-27B-DFlash2) / [z-lab mirror](https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2) — the DFlash2 block-diffusion drafter used by `start-dflash.sh` (trained against the bf16 `Qwen/Qwen3.8-27B`)
 - [inco.ai/blog/dflash2](https://inco.ai/blog/dflash2/) — DFlash2 write-up; its SGLang serving recipe is what `start-dflash.sh` pins

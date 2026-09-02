@@ -9,6 +9,11 @@
 > 
 then run `IMAGE=h1nw41/lmsysorg-sglang:latest-dflash2 ./start-dflash.sh`. See the [h1nw41/lmsysorg-sglang Docker Hub repository](https://hub.docker.com/repository/docker/h1nw41/lmsysorg-sglang).
 
+> **Tip (run `./start-dflash.sh` as-is).** The launcher defaults to the image name `lmsysorg/sglang:latest-dflash2`, and `ensure_image()` will try to **build that image from source** (git + network + overlay) if the name is not present locally — it does not look under the `h1nw41/` tag. So after pulling, either run with `IMAGE=h1nw41/lmsysorg-sglang:latest-dflash2` (above), or tag the pulled image to the default name and launch plainly:
+>
+>     docker tag h1nw41/lmsysorg-sglang:latest-dflash2 lmsysorg/sglang:latest-dflash2
+>     ./start-dflash.sh
+
 
 [![SGLang](https://img.shields.io/badge/SGLang-cookbook-blue)](https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-27B)
 [![Model](https://img.shields.io/badge/model-Qwen3.8--27B-informational)](https://huggingface.co/RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead)

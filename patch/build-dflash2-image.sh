@@ -21,7 +21,7 @@ case "${1:-}" in
 esac
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-base_image=lmsysorg/sglang:qwen38-27b
+base_image=lmsysorg/sglang:latest-acc
 stage="$(mktemp -d)"
 trap 'rm -rf "${stage}"' EXIT
 

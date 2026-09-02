@@ -1,5 +1,15 @@
 # Qwen3.8 27B on SGLang for DGX Spark
 
+
+> **Fork notice.** This is a personal fork of [MiaAI-Lab/Qwen3.8-27B-SGLang-DGX-Spark](https://github.com/MiaAI-Lab/Qwen3.8-27B-SGLang-DGX-Spark). It tracks the parent repository while carrying local, on-device tuning changes (see `CHANGELOG.md`). For the upstream scripts, measured results and full history, refer to the parent repository.
+
+> **Docker image.** No local build is required for the DFlash2 serving path. Pull the ready-made image instead:
+> 
+>     docker pull h1nw41/lmsysorg-sglang:latest-dflash2
+> 
+then run `IMAGE=h1nw41/lmsysorg-sglang:latest-dflash2 ./start-dflash.sh`. See the [h1nw41/lmsysorg-sglang Docker Hub repository](https://hub.docker.com/repository/docker/h1nw41/lmsysorg-sglang).
+
+
 [![SGLang](https://img.shields.io/badge/SGLang-cookbook-blue)](https://docs.sglang.io/cookbook/autoregressive/Qwen/Qwen3.8-27B)
 [![Model](https://img.shields.io/badge/model-Qwen3.8--27B-informational)](https://huggingface.co/RadixArk/Qwen3.8-27B-NVFP4-BF16-LMHead)
 [![arch](https://img.shields.io/badge/arch-arm64%20%2F%20GB10-lightgrey)](#)

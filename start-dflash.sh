@@ -37,7 +37,13 @@ if [[ -z "${HF_TOKEN:-}" && -f "${HOME}/.bashrc" ]]; then
 fi
 export HF_TOKEN
 
-IMAGE="${IMAGE:-lmsysorg/sglang:qwen38-27b-dflash2}"
+# Same for HF_ENDPOINT (hf-mirror etc.): used by the draft-pull container.
+if [[ -z "${HF_ENDPOINT:-}" && -f "${HOME}/.bashrc" ]]; then
+  HF_ENDPOINT="$(sed -n 's/^[[:space:]]*\(export[[:space:]]\+\)\?HF_ENDPOINT=["'"'"']\?\([A-Za-z0-9_.\/:-]\+\).*/\2/p' "${HOME}/.bashrc" | head -1)"
+fi
+export HF_ENDPOINT
+
+IMAGE="${IMAGE:-lmsysorg/sglang:latest-dflash2}"
 case "${IMAGE}" in *-minoverlay) build_mode=(--minimal) ;; *) build_mode=() ;; esac
 ensure_image() {
   if docker image inspect "${IMAGE}" >/dev/null 2>&1; then
@@ -60,6 +66,7 @@ ensure_cached() {
     docker run --rm --network host \
       -e HF_HOME=/root/.cache/huggingface \
       -e HF_TOKEN="${HF_TOKEN:-}" \
+      -e HF_ENDPOINT="${HF_ENDPOINT:-}" \
       -v "${SCRIPT_DIR}/.cache/huggingface:/root/.cache/huggingface" \
       "${IMAGE}" \
       python3 -c "from huggingface_hub import snapshot_download; snapshot_download('${repo}'${DRAFT_REVISION:+, revision='${DRAFT_REVISION}'})" \
@@ -69,7 +76,7 @@ ensure_cached() {
 }
 ensure_cached "${DRAFT_MODEL}"
 
-DF_TARGET="${DF_TARGET:-nvfp4}"
+DF_TARGET="${DF_TARGET:-nvfp4-fp4}"
 case "${DF_TARGET}" in
   bf16) TARGET_PATH="Qwen/Qwen3.8-27B" ;;
   nvfp4|nvfp4-bf16|nvfp4-bf16-head)
@@ -83,11 +90,35 @@ EXTRA_ARGS="--model-path ${TARGET_PATH} \
 --speculative-algorithm DFLASH \
 --speculative-draft-model-path ${DRAFT_MODEL}${DRAFT_REVISION:+ --speculative-draft-model-revision ${DRAFT_REVISION}} \
 --speculative-num-draft-tokens 8 \
+--torch-compile-max-bs 2 \
+--enable-torch-compile \
+--kv-cache-dtype fp8_e4m3 \
+--speculative-draft-kv-cache-dtype fp8_e4m3 \
+--stream-interval 2 \
+--tokenizer-worker-num 4 \
+--detokenizer-worker-num 4 \
+--fp8-gemm-backend flashinfer_cutlass \
+--fp4-gemm-backend flashinfer_cutlass \
+--attention-backend flashinfer \
+--tokenizer-mode auto \
+--mamba-backend flashinfer \
+--linear-attn-decode-backend cutedsl \
+--tokenizer-backend fastokens \
+--max-mamba-cache-size 72 \
+--chunked-prefill-size 4096 \
+--max-running-requests 2 \
+--mamba-ssm-dtype bfloat16 \
+--mamba-full-memory-ratio 4.21 \
+--reasoning-parser qwen3 \
+--tool-call-parser qwen3_coder \
 --mamba-radix-cache-strategy extra_buffer"
 case "${DF_TARGET}" in
   nvfp4|nvfp4-bf16|nvfp4-bf16-head|nvfp4-fp4|nvfp4-fp4-head)
-    EXTRA_ARGS+=" --mem-fraction-static 0.90" ;;
+    EXTRA_ARGS+=" --mem-fraction-static 0.88" ;;
 esac
+EXTRA_ARGS+=" --cuda-graph-max-bs-decode 1"
+EXTRA_ARGS+=" --cuda-graph-bs-decode 1"
+EXTRA_ARGS+=" --num-continuous-decode-steps 8"
 EXTRA_ARGS+=" ${DF_EXTRA:-}"
 export EXTRA_ARGS
 

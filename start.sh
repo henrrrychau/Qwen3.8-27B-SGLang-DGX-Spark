@@ -264,6 +264,13 @@ if [[ -z "${HF_TOKEN:-}" && -f "${HOME}/.bashrc" ]]; then
 fi
 export HF_TOKEN
 
+# Same for HF_ENDPOINT (hf-mirror etc.): pass it to the container so model
+# downloads use the configured mirror instead of huggingface.co.
+if [[ -z "${HF_ENDPOINT:-}" && -f "${HOME}/.bashrc" ]]; then
+  HF_ENDPOINT="$(sed -n 's/^[[:space:]]*\(export[[:space:]]\+\)\?HF_ENDPOINT=["'"'"']\?\([A-Za-z0-9_.\/:-]\+\).*/\2/p' "${HOME}/.bashrc" | head -1)"
+fi
+export HF_ENDPOINT
+
 if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER_NAME}"; then
   if docker ps --format '{{.Names}}' | grep -qx "${CONTAINER_NAME}"; then
     echo "Container ${CONTAINER_NAME} is already running"
@@ -303,6 +310,7 @@ docker run -d \
   -e TRITON_CACHE_DIR=/root/.triton \
   -e SGLANG_OPT_MAMBA_SKIP_DECODE_LOCK="${MAMBA_SKIP_DECODE_LOCK}" \
   -e HF_TOKEN="${HF_TOKEN:-}" \
+  -e HF_ENDPOINT="${HF_ENDPOINT:-}" \
   "${DOCKER_ENV_ARGS[@]}" \
   "${ALLOW_LONGER_ARGS[@]}" \
   -v "${HF_HOME}:/root/.cache/huggingface" \

@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -76,7 +77,7 @@ ensure_cached() {
 }
 ensure_cached "${DRAFT_MODEL}"
 
-DF_TARGET="${DF_TARGET:-nvfp4-fp4}"
+DF_TARGET="${DF_TARGET:-nvfp4}"
 case "${DF_TARGET}" in
   bf16) TARGET_PATH="Qwen/Qwen3.8-27B" ;;
   nvfp4|nvfp4-bf16|nvfp4-bf16-head)
@@ -90,7 +91,7 @@ EXTRA_ARGS="--model-path ${TARGET_PATH} \
 --speculative-algorithm DFLASH \
 --speculative-draft-model-path ${DRAFT_MODEL}${DRAFT_REVISION:+ --speculative-draft-model-revision ${DRAFT_REVISION}} \
 --speculative-num-draft-tokens 8 \
---torch-compile-max-bs 2 \
+--torch-compile-max-bs 8 \
 --enable-torch-compile \
 --kv-cache-dtype fp8_e4m3 \
 --speculative-draft-kv-cache-dtype fp8_e4m3 \
@@ -106,19 +107,20 @@ EXTRA_ARGS="--model-path ${TARGET_PATH} \
 --tokenizer-backend fastokens \
 --max-mamba-cache-size 72 \
 --chunked-prefill-size 4096 \
---max-running-requests 2 \
+--max-running-requests 8 \
 --mamba-ssm-dtype bfloat16 \
+--enable-streaming-session \
 --mamba-full-memory-ratio 4.21 \
 --reasoning-parser qwen3 \
 --tool-call-parser qwen3_coder \
 --mamba-radix-cache-strategy extra_buffer"
 case "${DF_TARGET}" in
   nvfp4|nvfp4-bf16|nvfp4-bf16-head|nvfp4-fp4|nvfp4-fp4-head)
-    EXTRA_ARGS+=" --mem-fraction-static 0.88" ;;
+    EXTRA_ARGS+=" --mem-fraction-static 0.75" ;;
 esac
-EXTRA_ARGS+=" --cuda-graph-max-bs-decode 1"
-EXTRA_ARGS+=" --cuda-graph-bs-decode 1"
-EXTRA_ARGS+=" --num-continuous-decode-steps 8"
+EXTRA_ARGS+=" --cuda-graph-max-bs-decode 2"
+EXTRA_ARGS+=" --cuda-graph-bs-decode 1 2"
+EXTRA_ARGS+=" --num-continuous-decode-steps 4"
 EXTRA_ARGS+=" ${DF_EXTRA:-}"
 export EXTRA_ARGS
 

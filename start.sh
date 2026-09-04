@@ -315,6 +315,7 @@ docker run -d \
   "${ALLOW_LONGER_ARGS[@]}" \
   -v "${HF_HOME}:/root/.cache/huggingface" \
   -v "${TRITON_CACHE_DIR}:/root/.triton" \
+  -v "${HOME}/models:${HOME}/models" \
   "${IMAGE}" \
   python3 -m sglang.launch_server \
   --model-path "${MODEL_ID}" \
